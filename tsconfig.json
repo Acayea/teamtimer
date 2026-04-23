@@ -8,5 +8,5 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts", "expo-env.d.ts"],
-  "exclude": ["drizzle.config.ts", "node_modules"]
+  "exclude": ["drizzle.config.ts", "node_modules", "tests"]
 }
