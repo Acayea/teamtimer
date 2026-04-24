@@ -9,19 +9,28 @@ import {
   StatusBar,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { getRace, getRaceEntries, startRace, endRace } from '@/repos/races';
+import {
+  getRace,
+  getRaceEntries,
+  startRace,
+  endRace,
+  getRelayLegsForEntry,
+  updateRelayLegAthlete,
+} from '@/repos/races';
 import {
   appendSplit,
   undoLastSplit,
   getSplitsForEntry,
   getTargetsForEntry,
 } from '@/repos/splits';
-import { getAthlete } from '@/repos/athletes';
-import type { Race, RaceEntry, Split, TargetSplit } from '@/db/schema';
+import { getAthlete, listAthletes } from '@/repos/athletes';
+import type { Race, RaceEntry, Split, TargetSplit, RelayLeg, Athlete } from '@/db/schema';
 import { useRaceClock } from '@/hooks/useRaceClock';
 import { useKeepAwake } from '@/hooks/useKeepAwake';
 import { AthleteCell } from '@/components/AthleteCell';
 import { RaceClock } from '@/components/RaceClock';
+import { RelayCell } from '@/components/RelayCell';
+import { ChangeAthleteModal } from '@/components/ChangeAthleteModal';
 import { colors } from '@/theme/colors';
 
 type EntryState = {
@@ -42,6 +51,11 @@ export default function LiveRaceScreen() {
   const [startedAt, setStartedAt]   = useState<number | null>(null);
   const [phase, setPhase]           = useState<Phase>('pre');
   const [lastTapEntry, setLastTapEntry] = useState<string | null>(null);
+
+  const [relayLegsMap, setRelayLegsMap]       = useState<Record<string, RelayLeg[]>>({});
+  const [athleteNamesMap, setAthleteNamesMap] = useState<Record<string, string>>({});
+  const [changingEntryId, setChangingEntryId] = useState<string | null>(null);
+  const [allAthletes, setAllAthletes]         = useState<Athlete[]>([]);
 
   const elapsed = useRaceClock(phase === 'running' ? startedAt : null);
   useKeepAwake(phase === 'running');
@@ -79,6 +93,19 @@ export default function LiveRaceScreen() {
       }),
     );
     setEntries(states.sort((a, b) => a.entry.slotIndex - b.entry.slotIndex));
+
+    if (r.kind === 'relay') {
+      const allA = await listAthletes();
+      setAllAthletes(allA);
+      setAthleteNamesMap(Object.fromEntries(allA.map((a) => [a.id, a.name])));
+
+      const legsMap: Record<string, RelayLeg[]> = Object.fromEntries(
+        await Promise.all(
+          rawEntries.map(async (entry) => [entry.id, await getRelayLegsForEntry(entry.id)]),
+        ),
+      );
+      setRelayLegsMap(legsMap);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -141,6 +168,28 @@ export default function LiveRaceScreen() {
     ]);
   };
 
+  const onChangeLeg = async (entryId: string, newAthleteId: string) => {
+    if (!race) return;
+    const legs = relayLegsMap[entryId] ?? [];
+    const es = entries.find((e) => e.entry.id === entryId);
+    const lapsPerLeg = race.expectedLaps / 4;
+    const currentLegIndex = Math.min(3, Math.floor((es?.splits.length ?? 0) / lapsPerLeg));
+    const leg = legs[currentLegIndex];
+    if (!leg) return;
+    try {
+      await updateRelayLegAthlete(leg.id, newAthleteId);
+      const updatedLegs = await getRelayLegsForEntry(entryId);
+      setRelayLegsMap((prev) => ({ ...prev, [entryId]: updatedLegs }));
+      if (!athleteNamesMap[newAthleteId]) {
+        const athlete = await getAthlete(newAthleteId);
+        if (athlete) setAthleteNamesMap((prev) => ({ ...prev, [athlete.id]: athlete.name }));
+      }
+    } catch {
+      Alert.alert('Error', 'Could not update athlete. Please try again.');
+    }
+    setChangingEntryId(null);
+  };
+
   if (!race) return null;
 
   // PRE-RACE OVERLAY
@@ -185,23 +234,61 @@ export default function LiveRaceScreen() {
       <StatusBar barStyle="light-content" />
       <RaceClock elapsedMs={elapsed} />
       <View style={gridStyle}>
-        {entries.map((es, i) => (
-          <AthleteCell
-            key={es.entry.id}
-            name={es.athleteName}
-            slotIndex={es.entry.slotIndex as 0 | 1 | 2 | 3}
-            lapIndex={es.splits.length}
-            expectedLaps={race.expectedLaps}
-            capturedAts={es.splits.map((sp) => sp.capturedAt)}
-            startedAt={startedAt!}
-            {...(es.targets.length > 0
-              ? { targetCumulativeMs: es.targets.map((t) => t.targetMs) }
-              : {})}
-            onTap={() => onTap(i)}
-            finished={es.splits.length >= race.expectedLaps}
-          />
-        ))}
+        {entries.map((es, i) => {
+          if (race.kind === 'relay') {
+            const lapsPerLeg = race.expectedLaps / 4;
+            const currentLegIndex = Math.min(3, Math.floor(es.splits.length / lapsPerLeg));
+            const legs = relayLegsMap[es.entry.id] ?? [];
+            const legRunnerNames = [0, 1, 2, 3].map(
+              (legIdx) => athleteNamesMap[legs[legIdx]?.athleteId ?? ''] ?? '?',
+            );
+            return (
+              <RelayCell
+                key={es.entry.id}
+                teamName={es.entry.teamName ?? '?'}
+                slotIndex={es.entry.slotIndex as 0 | 1 | 2 | 3}
+                currentLegIndex={currentLegIndex}
+                legRunnerNames={legRunnerNames}
+                capturedAts={es.splits.map((sp) => sp.capturedAt)}
+                startedAt={startedAt!}
+                elapsedMs={elapsed}
+                expectedLaps={race.expectedLaps}
+                onTap={() => onTap(i)}
+                onChangeLeg={() => setChangingEntryId(es.entry.id)}
+                finished={es.splits.length >= race.expectedLaps}
+              />
+            );
+          }
+          return (
+            <AthleteCell
+              key={es.entry.id}
+              name={es.athleteName}
+              slotIndex={es.entry.slotIndex as 0 | 1 | 2 | 3}
+              lapIndex={es.splits.length}
+              expectedLaps={race.expectedLaps}
+              capturedAts={es.splits.map((sp) => sp.capturedAt)}
+              startedAt={startedAt!}
+              {...(es.targets.length > 0
+                ? { targetCumulativeMs: es.targets.map((t) => t.targetMs) }
+                : {})}
+              onTap={() => onTap(i)}
+              finished={es.splits.length >= race.expectedLaps}
+            />
+          );
+        })}
       </View>
+      {race.kind === 'relay' && (
+        <ChangeAthleteModal
+          visible={changingEntryId !== null}
+          athletes={allAthletes}
+          onSelect={(athleteId) => {
+            if (changingEntryId) {
+              void onChangeLeg(changingEntryId, athleteId);
+            }
+          }}
+          onClose={() => setChangingEntryId(null)}
+        />
+      )}
       <View style={s.controls}>
         <TouchableOpacity
           style={s.undoBtn}

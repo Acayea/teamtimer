@@ -1,5 +1,5 @@
 // src/repos/races.ts
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   races,
@@ -8,6 +8,7 @@ import {
   relayLegs,
   type Race,
   type RaceEntry,
+  type RelayLeg,
 } from '@/db/schema';
 import { randomUUID } from 'expo-crypto';
 
@@ -113,4 +114,16 @@ export async function getRace(id: string): Promise<Race | undefined> {
 
 export async function getRaceEntries(raceId: string): Promise<RaceEntry[]> {
   return db.select().from(raceEntries).where(eq(raceEntries.raceId, raceId));
+}
+
+export async function getRelayLegsForEntry(raceEntryId: string): Promise<RelayLeg[]> {
+  return db
+    .select()
+    .from(relayLegs)
+    .where(eq(relayLegs.raceEntryId, raceEntryId))
+    .orderBy(asc(relayLegs.legIndex));
+}
+
+export async function updateRelayLegAthlete(relayLegId: string, athleteId: string): Promise<void> {
+  await db.update(relayLegs).set({ athleteId }).where(eq(relayLegs.id, relayLegId));
 }

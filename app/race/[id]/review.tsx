@@ -11,10 +11,10 @@ import {
   TextInput,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { getRace, getRaceEntries, discardRace } from '@/repos/races';
+import { getRace, getRaceEntries, discardRace, getRelayLegsForEntry } from '@/repos/races';
 import { getSplitsForEntry, getTargetsForEntry, editSplit } from '@/repos/splits';
 import { getAthlete } from '@/repos/athletes';
-import type { Race, RaceEntry, Split, TargetSplit, Athlete } from '@/db/schema';
+import type { Race, RaceEntry, Split, TargetSplit, Athlete, RelayLeg } from '@/db/schema';
 import {
   formatMs,
   formatDeltaMs,
@@ -29,6 +29,8 @@ type Row = {
   athlete: Athlete | null;
   splits: Split[];
   targets: TargetSplit[];
+  relayLegs?: RelayLeg[];
+  legRunnerNames?: string[];
 };
 
 export default function RaceReviewScreen() {
@@ -50,6 +52,18 @@ export default function RaceReviewScreen() {
           getTargetsForEntry(entry.id),
         ]);
         const athlete = entry.athleteId ? await getAthlete(entry.athleteId) : null;
+
+        if (r.kind === 'relay') {
+          const legs = await getRelayLegsForEntry(entry.id);
+          const legRunnerNames = await Promise.all(
+            legs.map(async (leg) => {
+              const a = await getAthlete(leg.athleteId);
+              return a?.name ?? '?';
+            }),
+          );
+          return { entry, athlete: athlete ?? null, splits: splitsData, targets, relayLegs: legs, legRunnerNames };
+        }
+
         return { entry, athlete: athlete ?? null, splits: splitsData, targets };
       }),
     );
@@ -114,39 +128,98 @@ export default function RaceReviewScreen() {
             <Text style={[s.cardName, { color: slotColor }]}>
               {row.athlete?.name ?? row.entry.teamName ?? '?'}
             </Text>
-            {row.splits.map((sp, lapIdx) => {
-              const lapMs = lapTimeMs(capturedAts, lapIdx, startedAt);
-              const cumMs = cumulativeMs(capturedAts, lapIdx, startedAt);
-              const delta = hasTargets
-                ? deltaMs(capturedAts, lapIdx, startedAt, targetMs)
-                : null;
-              const deltaColor =
-                delta === null
-                  ? colors.neutral
-                  : delta < 0
-                  ? colors.success
-                  : colors.danger;
+            {race.kind === 'relay' && row.relayLegs && row.legRunnerNames
+              ? (() => {
+                  const lapsPerLeg = race.expectedLaps / 4;
+                  return row.relayLegs.map((leg, legIdx) => {
+                    const legSplits = row.splits.slice(
+                      legIdx * lapsPerLeg,
+                      (legIdx + 1) * lapsPerLeg,
+                    );
+                    if (legSplits.length === 0) return null;
+                    const legStartAt =
+                      legIdx === 0
+                        ? startedAt
+                        : capturedAts[legIdx * lapsPerLeg - 1];
+                    const legEndAt: number | undefined = capturedAts[(legIdx + 1) * lapsPerLeg - 1];
+                    const legMs = legEndAt !== undefined ? legEndAt - legStartAt : null;
+                    return (
+                      <View key={leg.id}>
+                        <View style={s.legDivider}>
+                          <Text style={s.legDividerText}>
+                            {`Leg ${legIdx + 1} · ${row.legRunnerNames![legIdx] ?? '?'}${legMs !== null ? ` · ${formatMs(legMs)}` : ''}`}
+                          </Text>
+                        </View>
+                        {legSplits.map((sp) => {
+                          const globalLapIdx = row.splits.indexOf(sp);
+                          const lapMs = lapTimeMs(capturedAts, globalLapIdx, startedAt);
+                          const cumMs = cumulativeMs(capturedAts, globalLapIdx, startedAt);
+                          const delta = hasTargets
+                            ? deltaMs(capturedAts, globalLapIdx, startedAt, targetMs)
+                            : null;
+                          const deltaColor =
+                            delta === null
+                              ? colors.neutral
+                              : delta < 0
+                              ? colors.success
+                              : colors.danger;
+                          return (
+                            <TouchableOpacity
+                              key={sp.id}
+                              style={s.splitRow}
+                              onPress={() =>
+                                setEditing({ split: sp, value: formatMs(cumMs) })
+                              }
+                            >
+                              <Text style={s.lapNum}>Lap {globalLapIdx + 1}</Text>
+                              <Text style={s.lapMs}>{formatMs(lapMs)}</Text>
+                              <Text style={s.cumMs}>{formatMs(cumMs)}</Text>
+                              {delta !== null && (
+                                <Text style={[s.delta, { color: deltaColor }]}>
+                                  {formatDeltaMs(delta)}
+                                </Text>
+                              )}
+                              {sp.edited && <Text style={s.editedTag}>edited</Text>}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    );
+                  });
+                })()
+              : row.splits.map((sp, lapIdx) => {
+                  const lapMs = lapTimeMs(capturedAts, lapIdx, startedAt);
+                  const cumMs = cumulativeMs(capturedAts, lapIdx, startedAt);
+                  const delta = hasTargets
+                    ? deltaMs(capturedAts, lapIdx, startedAt, targetMs)
+                    : null;
+                  const deltaColor =
+                    delta === null
+                      ? colors.neutral
+                      : delta < 0
+                      ? colors.success
+                      : colors.danger;
 
-              return (
-                <TouchableOpacity
-                  key={sp.id}
-                  style={s.splitRow}
-                  onPress={() =>
-                    setEditing({ split: sp, value: formatMs(cumMs) })
-                  }
-                >
-                  <Text style={s.lapNum}>Lap {lapIdx + 1}</Text>
-                  <Text style={s.lapMs}>{formatMs(lapMs)}</Text>
-                  <Text style={s.cumMs}>{formatMs(cumMs)}</Text>
-                  {delta !== null && (
-                    <Text style={[s.delta, { color: deltaColor }]}>
-                      {formatDeltaMs(delta)}
-                    </Text>
-                  )}
-                  {sp.edited && <Text style={s.editedTag}>edited</Text>}
-                </TouchableOpacity>
-              );
-            })}
+                  return (
+                    <TouchableOpacity
+                      key={sp.id}
+                      style={s.splitRow}
+                      onPress={() =>
+                        setEditing({ split: sp, value: formatMs(cumMs) })
+                      }
+                    >
+                      <Text style={s.lapNum}>Lap {lapIdx + 1}</Text>
+                      <Text style={s.lapMs}>{formatMs(lapMs)}</Text>
+                      <Text style={s.cumMs}>{formatMs(cumMs)}</Text>
+                      {delta !== null && (
+                        <Text style={[s.delta, { color: deltaColor }]}>
+                          {formatDeltaMs(delta)}
+                        </Text>
+                      )}
+                      {sp.edited && <Text style={s.editedTag}>edited</Text>}
+                    </TouchableOpacity>
+                  );
+                })}
             {row.splits.length === 0 && (
               <Text style={s.noSplits}>No splits recorded</Text>
             )}
@@ -276,4 +349,17 @@ const s = StyleSheet.create({
   },
   cancel: { color: colors.textSecondary, fontSize: 16, padding: 8 },
   save: { color: colors.accent, fontSize: 16, fontWeight: '700', padding: 8 },
+  legDivider: {
+    backgroundColor: colors.surfaceElevated,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginTop: 4,
+    borderRadius: 4,
+  },
+  legDividerText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
 });
