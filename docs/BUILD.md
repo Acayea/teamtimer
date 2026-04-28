@@ -119,6 +119,7 @@ Typical accuracy: ±1 ms capture precision, ±100–200 ms human reaction time. 
 | Problem | Fix |
 |---------|-----|
 | Metro bundler can't find `@/` imports | Confirm `metro.config.js` has `resolver.alias: { '@': path.resolve(__dirname, 'src') }` |
+| EAS build fails with `Unable to resolve module ./XXXX_*.sql` | `metro.config.js` must include `config.resolver.sourceExts.push('sql')` so Drizzle migration files bundle correctly |
 | `pnpm db:generate` errors | Ensure `drizzle-kit` is installed (`pnpm add -D drizzle-kit`) |
 | App crashes on launch | Check Expo Go version matches SDK — update Expo Go or run `npx expo install --fix` |
 | Screen dims during race | `expo-keep-awake` must be installed — check `package.json` |
