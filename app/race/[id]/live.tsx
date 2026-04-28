@@ -113,9 +113,13 @@ export default function LiveRaceScreen() {
   }, [loadData]);
 
   const onGo = async () => {
-    const ts = await startRace(id);
-    setStartedAt(ts);
-    setPhase('running');
+    try {
+      const ts = await startRace(id);
+      setStartedAt(ts);
+      setPhase('running');
+    } catch {
+      Alert.alert('Could not start race', 'Please try again.');
+    }
   };
 
   const onTap = async (entryIndex: number) => {
@@ -124,11 +128,11 @@ export default function LiveRaceScreen() {
     const lapIndex = es.splits.length;
     if (lapIndex >= race.expectedLaps) return;
 
-    const capturedAt = await appendSplit(es.entry.id, lapIndex);
+    const { id: splitId, capturedAt } = await appendSplit(es.entry.id, lapIndex);
     setLastTapEntry(es.entry.id);
 
     const newSplit: Split = {
-      id: '',
+      id: splitId,
       raceEntryId: es.entry.id,
       lapIndex,
       capturedAt,
@@ -171,9 +175,10 @@ export default function LiveRaceScreen() {
   const onChangeLeg = async (entryId: string, newAthleteId: string) => {
     if (!race) return;
     const legs = relayLegsMap[entryId] ?? [];
+    if (legs.length === 0) return;
     const es = entries.find((e) => e.entry.id === entryId);
-    const lapsPerLeg = race.expectedLaps / 4;
-    const currentLegIndex = Math.min(3, Math.floor((es?.splits.length ?? 0) / lapsPerLeg));
+    const lapsPerLeg = Math.floor(race.expectedLaps / legs.length);
+    const currentLegIndex = Math.min(legs.length - 1, Math.floor((es?.splits.length ?? 0) / lapsPerLeg));
     const leg = legs[currentLegIndex];
     if (!leg) return;
     try {
@@ -236,11 +241,12 @@ export default function LiveRaceScreen() {
       <View style={gridStyle}>
         {entries.map((es, i) => {
           if (race.kind === 'relay') {
-            const lapsPerLeg = race.expectedLaps / 4;
-            const currentLegIndex = Math.min(3, Math.floor(es.splits.length / lapsPerLeg));
             const legs = relayLegsMap[es.entry.id] ?? [];
-            const legRunnerNames = [0, 1, 2, 3].map(
-              (legIdx) => athleteNamesMap[legs[legIdx]?.athleteId ?? ''] ?? '?',
+            const legCount = legs.length || 1;
+            const lapsPerLeg = Math.floor(race.expectedLaps / legCount);
+            const currentLegIndex = Math.min(legCount - 1, Math.floor(es.splits.length / lapsPerLeg));
+            const legRunnerNames = legs.map(
+              (leg) => athleteNamesMap[leg.athleteId] ?? '?',
             );
             return (
               <RelayCell
@@ -253,6 +259,7 @@ export default function LiveRaceScreen() {
                 startedAt={startedAt!}
                 elapsedMs={elapsed}
                 expectedLaps={race.expectedLaps}
+                legCount={legCount}
                 onTap={() => onTap(i)}
                 onChangeLeg={() => setChangingEntryId(es.entry.id)}
                 finished={es.splits.length >= race.expectedLaps}

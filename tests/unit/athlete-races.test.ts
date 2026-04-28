@@ -66,4 +66,17 @@ describe('buildAthleteRaceResults', () => {
     const rows = [{ ...BASE, meetName: null, lapIndex: 0, capturedAt: 1_062_000 }];
     expect(buildAthleteRaceResults(rows)[0].meetName).toBeNull();
   });
+
+  it('sorts rows by lapIndex internally so finalCumulativeMs is correct even if input is unordered', () => {
+    // rows arrive in scrambled order — helper must still pick the highest-lapIndex row as "last"
+    const rows = [
+      { ...BASE, lapIndex: 2, capturedAt: 1_188_000 },
+      { ...BASE, lapIndex: 0, capturedAt: 1_062_000 },
+      { ...BASE, lapIndex: 3, capturedAt: 1_252_000 }, // true final
+      { ...BASE, lapIndex: 1, capturedAt: 1_124_000 },
+    ];
+    const results = buildAthleteRaceResults(rows);
+    expect(results[0].finalCumulativeMs).toBe(252_000); // 1_252_000 - 1_000_000
+    expect(results[0].lapCount).toBe(4);
+  });
 });

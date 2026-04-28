@@ -30,49 +30,51 @@ export type CreateRaceInput = {
 export async function createRace(input: CreateRaceInput): Promise<string> {
   const raceId = randomUUID();
   const now = Date.now();
-  await db.insert(races).values({
-    id: raceId,
-    kind: input.kind,
-    distanceM: input.distanceM,
-    lapDistanceM: input.lapDistanceM,
-    expectedLaps: input.expectedLaps,
-    meetId: input.meetId ?? null,
-    status: 'setup',
-    createdAt: now,
-    startedAt: null,
-    endedAt: null,
-  });
-  for (const e of input.entries) {
-    const entryId = randomUUID();
-    await db.insert(raceEntries).values({
-      id: entryId,
-      raceId,
-      slotIndex: e.slotIndex,
-      athleteId: e.athleteId ?? null,
-      teamName: e.teamName ?? null,
-      finishedAt: null,
+  await db.transaction(async (tx) => {
+    await tx.insert(races).values({
+      id: raceId,
+      kind: input.kind,
+      distanceM: input.distanceM,
+      lapDistanceM: input.lapDistanceM,
+      expectedLaps: input.expectedLaps,
+      meetId: input.meetId ?? null,
+      status: 'setup',
+      createdAt: now,
+      startedAt: null,
+      endedAt: null,
     });
-    if (e.targetCumulativeMs) {
-      for (let i = 0; i < e.targetCumulativeMs.length; i++) {
-        await db.insert(targetSplits).values({
-          id: randomUUID(),
-          raceEntryId: entryId,
-          lapIndex: i,
-          targetMs: e.targetCumulativeMs[i],
-        });
+    for (const e of input.entries) {
+      const entryId = randomUUID();
+      await tx.insert(raceEntries).values({
+        id: entryId,
+        raceId,
+        slotIndex: e.slotIndex,
+        athleteId: e.athleteId ?? null,
+        teamName: e.teamName ?? null,
+        finishedAt: null,
+      });
+      if (e.targetCumulativeMs) {
+        for (let i = 0; i < e.targetCumulativeMs.length; i++) {
+          await tx.insert(targetSplits).values({
+            id: randomUUID(),
+            raceEntryId: entryId,
+            lapIndex: i,
+            targetMs: e.targetCumulativeMs[i],
+          });
+        }
+      }
+      if (e.legs) {
+        for (const leg of e.legs) {
+          await tx.insert(relayLegs).values({
+            id: randomUUID(),
+            raceEntryId: entryId,
+            legIndex: leg.legIndex,
+            athleteId: leg.athleteId,
+          });
+        }
       }
     }
-    if (e.legs) {
-      for (const leg of e.legs) {
-        await db.insert(relayLegs).values({
-          id: randomUUID(),
-          raceEntryId: entryId,
-          legIndex: leg.legIndex,
-          athleteId: leg.athleteId,
-        });
-      }
-    }
-  }
+  });
   return raceId;
 }
 

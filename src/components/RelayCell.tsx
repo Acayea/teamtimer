@@ -8,12 +8,13 @@ import { typography } from '@/theme/typography';
 type Props = {
   teamName: string;
   slotIndex: 0 | 1 | 2 | 3;
-  currentLegIndex: number;    // 0–3; capped at 3 when finished
-  legRunnerNames: string[];   // length 4, one name per leg by legIndex
+  currentLegIndex: number;    // 0..legCount-1; capped at legCount-1 when finished
+  legRunnerNames: string[];   // length === legCount, one name per leg by legIndex
   capturedAts: number[];      // all splits for this entry so far (ms epoch)
   startedAt: number;          // race.startedAt (ms epoch)
   elapsedMs: number;          // current elapsed from useRaceClock
   expectedLaps: number;       // e.g. 8 for 4×800
+  legCount?: number;          // number of legs (default 4)
   onTap: () => void;
   onChangeLeg: () => void;
   finished: boolean;
@@ -28,11 +29,12 @@ export function RelayCell({
   startedAt,
   elapsedMs,
   expectedLaps,
+  legCount = 4,
   onTap,
   onChangeLeg,
   finished,
 }: Props) {
-  const lapsPerLeg = expectedLaps / 4;
+  const lapsPerLeg = Math.floor(expectedLaps / legCount);
   const legStartEpoch =
     currentLegIndex === 0 ? startedAt : capturedAts[currentLegIndex * lapsPerLeg - 1];
   const legElapsedMs = elapsedMs - (legStartEpoch - startedAt);
@@ -60,7 +62,7 @@ export function RelayCell({
     >
       <View style={s.header}>
         <Text style={s.headerText}>
-          Leg {currentLegIndex + 1}/4 · {teamName}
+          Leg {currentLegIndex + 1}/{legCount} · {teamName}
         </Text>
         <TouchableOpacity style={s.changeBtn} onPress={onChangeLeg} disabled={finished}>
           <Text style={s.changeBtnText}>Change</Text>

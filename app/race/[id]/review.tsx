@@ -130,7 +130,8 @@ export default function RaceReviewScreen() {
             </Text>
             {race.kind === 'relay' && row.relayLegs && row.legRunnerNames
               ? (() => {
-                  const lapsPerLeg = race.expectedLaps / 4;
+                  const legCount = row.relayLegs.length;
+                  const lapsPerLeg = Math.floor(race.expectedLaps / legCount);
                   return row.relayLegs.map((leg, legIdx) => {
                     const legSplits = row.splits.slice(
                       legIdx * lapsPerLeg,
@@ -150,8 +151,8 @@ export default function RaceReviewScreen() {
                             {`Leg ${legIdx + 1} · ${row.legRunnerNames![legIdx] ?? '?'}${legMs !== null ? ` · ${formatMs(legMs)}` : ''}`}
                           </Text>
                         </View>
-                        {legSplits.map((sp) => {
-                          const globalLapIdx = row.splits.indexOf(sp);
+                        {legSplits.map((sp, splitIdxInLeg) => {
+                          const globalLapIdx = legIdx * lapsPerLeg + splitIdxInLeg;
                           const lapMs = lapTimeMs(capturedAts, globalLapIdx, startedAt);
                           const cumMs = cumulativeMs(capturedAts, globalLapIdx, startedAt);
                           const delta = hasTargets

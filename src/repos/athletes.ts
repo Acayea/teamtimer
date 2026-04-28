@@ -65,8 +65,9 @@ export function buildAthleteRaceResults(rows: RawRow[]): AthleteRaceResult[] {
 
   const results: AthleteRaceResult[] = [];
   for (const [raceEntryId, entryRows] of entryMap) {
-    const first = entryRows[0];
-    const last = entryRows[entryRows.length - 1]; // highest lapIndex (rows are ordered by lapIndex asc)
+    const sorted = [...entryRows].sort((a, b) => a.lapIndex - b.lapIndex);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
     const startedAt = first.startedAt!; // safe: getAthleteRaces filters isNotNull(races.startedAt)
     results.push({
       raceId: first.raceId,
@@ -75,7 +76,7 @@ export function buildAthleteRaceResults(rows: RawRow[]): AthleteRaceResult[] {
       meetName: first.meetName,
       startedAt,
       finalCumulativeMs: last.capturedAt - startedAt,
-      lapCount: entryRows.length,
+      lapCount: sorted.length,
     });
   }
 

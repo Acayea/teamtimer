@@ -31,8 +31,9 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import LiveRaceScreen from '../../app/race/[id]/live';
 import {
-  getRace, getRaceEntries, getRelayLegsForEntry, updateRelayLegAthlete,
+  getRace, getRaceEntries, getRelayLegsForEntry, updateRelayLegAthlete, startRace,
 } from '@/repos/races';
+import { Alert } from 'react-native';
 import { getSplitsForEntry, getTargetsForEntry } from '@/repos/splits';
 import { listAthletes, getAthlete } from '@/repos/athletes';
 
@@ -115,5 +116,18 @@ describe('RelayLive', () => {
     await waitFor(() => {
       expect(screen.queryByText('Jake Torres')).toBeNull();
     });
+  });
+
+  it('shows Alert when startRace throws on GO press', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    (getRace as jest.Mock).mockResolvedValue({ ...RELAY_RACE, status: 'setup', startedAt: null });
+    (startRace as jest.Mock).mockRejectedValue(new Error('db locked'));
+    render(<LiveRaceScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Start race')).toBeTruthy());
+    fireEvent.press(screen.getByLabelText('Start race'));
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith('Could not start race', expect.any(String));
+    });
+    alertSpy.mockRestore();
   });
 });

@@ -11,40 +11,52 @@ import {
 } from '@/db/schema';
 import { randomUUID } from 'expo-crypto';
 
-/** Append a new split for an entry. Returns the captured timestamp. */
-export async function appendSplit(raceEntryId: string, lapIndex: number): Promise<number> {
+/** Append a new split for an entry. Returns the new split id and captured timestamp. */
+export async function appendSplit(
+  raceEntryId: string,
+  lapIndex: number,
+): Promise<{ id: string; capturedAt: number }> {
+  const id = randomUUID();
   const capturedAt = Date.now();
-  await db.insert(splits).values({
-    id: randomUUID(),
-    raceEntryId,
-    lapIndex,
-    capturedAt,
-    edited: false,
+  await db.transaction(async (tx) => {
+    await tx.insert(splits).values({
+      id,
+      raceEntryId,
+      lapIndex,
+      capturedAt,
+      edited: false,
+    });
+    const expectedLaps = await getExpectedLaps(tx, raceEntryId);
+    if (lapIndex === expectedLaps - 1) {
+      await tx
+        .update(raceEntries)
+        .set({ finishedAt: capturedAt })
+        .where(eq(raceEntries.id, raceEntryId));
+    }
   });
-  const expectedLaps = await getExpectedLaps(raceEntryId);
-  if (lapIndex === expectedLaps - 1) {
-    await db
-      .update(raceEntries)
-      .set({ finishedAt: capturedAt })
-      .where(eq(raceEntries.id, raceEntryId));
-  }
-  return capturedAt;
+  return { id, capturedAt };
 }
 
 /** Remove the most recent split for an entry. */
 export async function undoLastSplit(raceEntryId: string): Promise<void> {
-  const last = await db
-    .select()
-    .from(splits)
-    .where(eq(splits.raceEntryId, raceEntryId))
-    .orderBy(desc(splits.lapIndex))
-    .limit(1);
-  if (last.length === 0) return;
-  await db.delete(splits).where(eq(splits.id, last[0].id));
-  await db
-    .update(raceEntries)
-    .set({ finishedAt: null })
-    .where(eq(raceEntries.id, raceEntryId));
+  await db.transaction(async (tx) => {
+    const last = await tx
+      .select()
+      .from(splits)
+      .where(eq(splits.raceEntryId, raceEntryId))
+      .orderBy(desc(splits.lapIndex))
+      .limit(1);
+    if (last.length === 0) return;
+    const removed = last[0];
+    await tx.delete(splits).where(eq(splits.id, removed.id));
+    const expectedLaps = await getExpectedLaps(tx, raceEntryId);
+    if (removed.lapIndex === expectedLaps - 1) {
+      await tx
+        .update(raceEntries)
+        .set({ finishedAt: null })
+        .where(eq(raceEntries.id, raceEntryId));
+    }
+  });
 }
 
 /** Get all splits for an entry, ordered by lap index. */
@@ -70,12 +82,14 @@ export async function getTargetsForEntry(raceEntryId: string): Promise<TargetSpl
     .orderBy(targetSplits.lapIndex);
 }
 
-async function getExpectedLaps(raceEntryId: string): Promise<number> {
-  const [entry] = await db
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function getExpectedLaps(runner: DbOrTx, raceEntryId: string): Promise<number> {
+  const [entry] = await runner
     .select({ raceId: raceEntries.raceId })
     .from(raceEntries)
     .where(eq(raceEntries.id, raceEntryId));
-  const [race] = await db
+  const [race] = await runner
     .select({ expectedLaps: races.expectedLaps })
     .from(races)
     .where(eq(races.id, entry.raceId));
